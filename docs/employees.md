@@ -8,30 +8,52 @@ first, the agents follow.
 
 ## Decisions
 
-**Platform: Rivet Cloud.** agentOS isolates (V8) run the agents; Rivet
-Actors hold durable state, cron, and park/wake; Rivet Containers are
-disposable tools only (a build, a browser), never residences. Chosen over
-Cloudflare's agent stack and over managed agents for ownership: we own the
-harness, the state, and the exit path, and we coast on free tiers while
+**Platform: Pi Durable on Rivet Actors.** Each agent instance is one Rivet
+Actor running Pi through [Pi Durable](https://rivet.dev/agents/docs/pi/)
+(`piDurable()` from `@rivet-dev/pi/durable`, over
+`@earendil-works/pi-durable`). Every step — model call, tool call, task
+phase — is checkpointed to the actor's SQLite before the next begins, so a
+crash, an OOM or a deploy resumes the run instead of losing it. Idle actors
+sleep. Coding tools (read, write, edit, bash) run in a sandbox attached to
+the actor; Rivet Containers stay disposable tools, never residences. Chosen
+over Cloudflare's agent stack and over managed agents for ownership: we own
+the harness, the state, and the exit path, and we coast on free tiers while
 Zagrajmy makes no money.
 
 **Two agents.** *Kobold* does everything except coding and is the one that
 may someday be exposed to event organizers (through organizer-scoped MCP
 tokens). *Goblin* codes, is team-only, and is effectively a superset of
-Kobold. Goblin acts on GitHub as a GitHub App, not a user account (a
-previous bot user got banned; Apps are the sanctioned identity).
+Kobold. Neither acts as a human: Goblin acts on GitHub as a GitHub App, not
+a user account (a previous bot user got banned; Apps are the sanctioned
+identity), and on Zagrajmy as its own service superuser, not as a person's
+account.
 
-**Harness: Pi.** The coding agent inside the isolates is Pi, extended per
-agent. The only Zagrajmy tool surface is the Zagrajmy MCP server
-([mcp.md](https://github.com/zagrajmy/ludamus/blob/main/docs/agents/mcp.md)) consumed through a thin discovery-based client — one Pi
-tool per MCP tool, registered at startup
-(`extensions/goblin-zagrajmy/`). No native-tool mirrors, no codemode layer: one
-surface, growth happens server-side.
+**Harness: Pi, both agents.** The only Zagrajmy tool surface is the Zagrajmy
+MCP server
+([mcp.md](https://github.com/zagrajmy/ludamus/blob/main/docs/agents/mcp.md))
+consumed through a thin discovery-based client — one Pi tool per MCP tool,
+registered at startup (`extensions/goblin-zagrajmy/`). No native-tool
+mirrors, no codemode layer: one surface, growth happens server-side. What
+Pi Durable on Rivet changes about that:
+
+- Extensions are `defineExtension` registries of `defineTool`s, not Pi CLI
+  extension files. The bridge scaffolding targets the CLI API today and has
+  to be retargeted; every community extension must be ported or replaced.
+- Every tool declares whether it is safe to replay after a crash. A
+  Zagrajmy MCP tool is replay-unsafe unless the server marks it read-only or
+  idempotent, so a crash mid-write reports "interrupted" instead of writing
+  twice.
+- Pi Durable loads no skills and no `AGENTS.md`, so house context —
+  `CLAUDE.md`, the glimpse rules, the Polish glossary — is supplied to the
+  agent explicitly.
+- It is beta and roll-forward only: versions are pinned, and an actor's
+  SQLite is backed up before any upgrade.
 
 **Gateway doctrine.** Two things are never outsourced: the auditor (an
-in-harness interceptor on every tool call — policy, approvals, audit log)
-and the secrets broker (a Rivet Actor injecting short-lived credentials per
-call; nothing secret at rest in an isolate).
+interceptor on every tool call — policy, approvals, audit log) and the
+secrets broker (an actor injecting short-lived credentials per call;
+nothing secret at rest with the agent). Pi Durable has no built-in approval
+flow, so approvals stay ours.
 
 **Humans as MCP.** *Divine Intervention* (Fleshling): a real Discord DM to
 Piotr or Radek, reserved for blocking-and-important calls, with GitHub
@@ -42,10 +64,9 @@ the human's actual ones ≥95% over 20+ samples.
 
 **Verification tiers.**
 
-- *Trial I* — in-isolate fail-fast checks (blocked today on Python 3.14
-  WASM wheels; not load-bearing).
+- *Trial I* — in-sandbox fail-fast checks (not load-bearing).
 - *Trial II* — the pre-review gauntlet: `mise run verify` (hk lint, pytest
-  on SQLite, Playwright e2e), runnable anywhere via
+  on SQLite, Playwright e2e), runnable anywhere via ludamus's
   `docker/verification.Dockerfile`.
 - *Trial III* — the real CI on GitHub.
 - *Torment Nexus* — repeated `/thermo-nuclear-code-quality-review` rounds by
@@ -66,12 +87,18 @@ Default is important.
 **Staging remote.** Agents iterate against a staging git remote; GitHub
 sees conclusions, not process.
 
-**Frontend: the Battlemap.** The agents' UI is a separate React/TypeScript
-app (fork of the shadcn chatbot template), explicitly not Django.
+**Battlemap: the operator surface.** A successor to Zagrajmy's Django Admin,
+where operators run the platform and its agents. A Bun and Vite app built
+with the Cloudflare Vite plugin, explicitly not Django.
 
-**Auth & spend.** Claude Code runs on the subscription OAuth token
-(`CLAUDE_CODE_OAUTH_TOKEN`) while pre-revenue. Flip to API keys when either
-revenue exists or agent usage rate-limits a human twice in one week.
+**Memory: not OptChat.** OptChat's compressed-tree chat memory was
+considered and is not used for either agent.
+
+**Auth & spend.** Pi is not Claude Code, so whether a Claude subscription
+token may drive it must be confirmed before relying on it. If it may, the
+subscription carries the agents while pre-revenue, and the flip to API keys
+happens when either revenue exists or agent usage rate-limits a human twice
+in one week. If it may not, model spend is a capped API key from the start.
 
 ## Where things live
 
@@ -87,15 +114,15 @@ that describes or verifies ludamus itself:
   session replay (`data-ph-mask`), guarded source-map upload in the deploy.
 - The Zagrajmy MCP server and its docs.
 
-## Open since this record was written
+## Still open
 
-This record moved here from ludamus unchanged apart from paths. Three of its
-decisions have been reopened in the living plan since:
-
-- **Platform.** The keeper now leans toward Effect, Alchemy and Cloudflare
-  over Rivet. A bake-off settles it.
-- **Goblin's harness.** This record says Pi; the plan says Claude Code. The
-  shared extensions, the auditor included, are Pi extensions, so the choice
-  decides whether Goblin can load them.
-- **Repository.** The agents' code moved out of ludamus so the merge-tier
-  policy lives where Goblin cannot open pull requests against it.
+- **pgbot.** A direct read-only database connection goes around the
+  only-through-MCP rule. Either ratify a diagnostics exception, or expose
+  its findings through a maintainer MCP tool.
+- **Simulacrum graduation.** Graduating a persona needs an auditor
+  exception, because the auditor refuses any action justified by simulated
+  opinion alone.
+- **Subscription or API key.** See *Auth & spend*.
+- **Effect and Alchemy.** They arrived with the Cloudflare leaning for the
+  agents, which Rivet now supersedes. Whether they stay for the agents'
+  TypeScript, or only for the Battlemap, is undecided.
