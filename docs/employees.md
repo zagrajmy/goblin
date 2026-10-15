@@ -123,6 +123,10 @@ that describes or verifies ludamus itself:
   exception, because the auditor refuses any action justified by simulated
   opinion alone.
 - **Subscription or API key.** See *Auth & spend*.
-- **Effect and Alchemy.** They arrived with the Cloudflare leaning for the
-  agents, which Rivet now supersedes. Whether they stay for the agents'
-  TypeScript, or only for the Battlemap, is undecided.
+- **Effect and Alchemy.** Alchemy now deploys Parley (ludamus #1481), with
+  Effect confined to its stack file. Alchemy has no Rivet provider, so for
+  the agents it can manage only what surrounds them: secrets, DNS, GitHub
+  configuration. Whether the agents' own TypeScript adopts Effect is
+  undecided. Alchemy's Vite resource replaces the Cloudflare Vite plugin,
+  so deploying the Battlemap with it means either giving up that plugin or
+  handing Alchemy a prebuilt bundle.
